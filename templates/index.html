@@ -1,0 +1,1969 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NeuroMark — EEG Seizure Stage Analysis</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&family=Bebas+Neue&display=swap" rel="stylesheet">
+<script src="/static/js/chart.umd.min.js"></script>
+<style>
+/* ═══════════════════════════════════════════════════════════════════════════
+   DESIGN SYSTEM — Industrial Neuro-Medical Dark
+   ═══════════════════════════════════════════════════════════════════════════ */
+:root {
+  --bg-void:      #06080d;
+  --bg-deep:      #0a0e1a;
+  --bg-surface:   #0f1420;
+  --bg-raised:    #141928;
+  --bg-hover:     #1a2135;
+  --border:       #1e2a3f;
+  --border-bright:#2a3a55;
+
+  --text-primary:   #e8edf5;
+  --text-secondary: #8a9bb5;
+  --text-dim:       #4a5a75;
+  --text-mono:      #c0cfe8;
+
+  --cyan:    #00d4ff;
+  --cyan-dim: #007a99;
+  --green:   #22c55e;
+  --yellow:  #eab308;
+  --red:     #ef4444;
+  --blue:    #3b82f6;
+  --purple:  #a855f7;
+
+  --ictal-color:     #ef4444;
+  --pre-color:       #eab308;
+  --post-color:      #3b82f6;
+  --inter-color:     #22c55e;
+
+  --font-display:  'Bebas Neue', sans-serif;
+  --font-body:     'DM Sans', sans-serif;
+  --font-mono:     'Space Mono', monospace;
+
+  --radius:  4px;
+  --radius-lg: 8px;
+  --glow-cyan: 0 0 20px rgba(0, 212, 255, 0.15);
+  --glow-red:  0 0 20px rgba(239, 68, 68, 0.2);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg-void);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.6;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ── SCANLINE OVERLAY ── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 212, 255, 0.012) 2px,
+    rgba(0, 212, 255, 0.012) 4px
+  );
+  pointer-events: none;
+  z-index: 1000;
+}
+
+/* ── GRID TEXTURE ── */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(0,212,255,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,212,255,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 999;
+}
+
+/* ════════════════════════════
+   HEADER
+════════════════════════════ */
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgba(6, 8, 13, 0.92);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  padding: 0 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 60px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo-icon {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--cyan);
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--glow-cyan);
+}
+
+.logo-icon svg { width: 18px; height: 18px; }
+
+.logo-text {
+  font-family: var(--font-display);
+  font-size: 24px;
+  letter-spacing: 3px;
+  color: var(--text-primary);
+}
+
+.logo-sub {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: var(--cyan);
+  text-transform: uppercase;
+  margin-top: -4px;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.status-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+
+.status-pill.ready .status-dot  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.status-pill.error .status-dot  { background: var(--red); box-shadow: 0 0 6px var(--red); }
+.status-pill.ready .status-text { color: var(--green); }
+.status-pill.error .status-text { color: var(--red); }
+
+/* ════════════════════════════
+   LAYOUT
+════════════════════════════ */
+.main {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  min-height: calc(100vh - 60px);
+}
+
+/* ════════════════════════════
+   SIDEBAR
+════════════════════════════ */
+.sidebar {
+  border-right: 1px solid var(--border);
+  background: var(--bg-deep);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow-y: auto;
+}
+
+.sidebar-section {
+  border-bottom: 1px solid var(--border);
+  padding: 24px;
+}
+
+.section-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--border), transparent);
+}
+
+/* ── DROP ZONE ── */
+.drop-zone {
+  border: 1px dashed var(--border-bright);
+  border-radius: var(--radius-lg);
+  padding: 32px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: rgba(0,212,255,0.02);
+  position: relative;
+  overflow: hidden;
+}
+
+.drop-zone::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  background: linear-gradient(135deg,
+    rgba(0,212,255,0) 0%,
+    rgba(0,212,255,0.05) 50%,
+    rgba(0,212,255,0) 100%
+  );
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.drop-zone:hover,
+.drop-zone.dragover {
+  border-color: var(--cyan);
+  background: rgba(0,212,255,0.04);
+  box-shadow: var(--glow-cyan);
+}
+
+.drop-zone:hover::before,
+.drop-zone.dragover::before { opacity: 1; }
+
+.drop-icon {
+  width: 40px;
+  height: 40px;
+  margin: 0 auto 12px;
+  opacity: 0.5;
+}
+
+.drop-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.drop-sub {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 0.5px;
+}
+
+.drop-zone.has-file {
+  border-color: var(--green);
+  background: rgba(34,197,94,0.05);
+}
+
+.drop-zone.has-file .drop-icon { opacity: 1; }
+
+.file-info {
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--green);
+  word-break: break-all;
+}
+
+input[type="file"] { display: none; }
+
+/* ── OPTIONAL FILE ── */
+.optional-upload {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: transparent;
+  gap: 10px;
+}
+
+.optional-upload:hover {
+  border-color: var(--border-bright);
+  background: var(--bg-hover);
+}
+
+.optional-upload.has-file {
+  border-color: var(--cyan-dim);
+}
+
+.optional-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  flex: 1;
+}
+
+.optional-label.active { color: var(--cyan); }
+
+.optional-badge {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--bg-raised);
+  color: var(--text-dim);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+/* ── MONTAGE SELECT ── */
+.form-group { margin-top: 14px; }
+
+.form-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 6px;
+}
+
+select, input {
+  width: 100%;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 8px 10px;
+  outline: none;
+  transition: border-color 0.2s;
+  appearance: none;
+}
+
+select:focus, input:focus { border-color: var(--cyan-dim); }
+
+.select-wrap { position: relative; }
+.select-wrap::after {
+  content: '▾';
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-dim);
+  pointer-events: none;
+  font-size: 12px;
+}
+
+/* ── ANALYZE BUTTON ── */
+.btn-analyze {
+  width: 100%;
+  padding: 14px;
+  background: transparent;
+  border: 1px solid var(--cyan);
+  border-radius: var(--radius);
+  color: var(--cyan);
+  font-family: var(--font-display);
+  font-size: 18px;
+  letter-spacing: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.btn-analyze::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--cyan);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.2s;
+  z-index: 0;
+}
+
+.btn-analyze span { position: relative; z-index: 1; }
+
+.btn-analyze:hover:not(:disabled) {
+  color: var(--bg-void);
+  box-shadow: var(--glow-cyan);
+}
+
+.btn-analyze:hover:not(:disabled)::before { transform: scaleX(1); }
+
+.btn-analyze:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  border-color: var(--text-dim);
+  color: var(--text-dim);
+}
+
+/* ── SIDEBAR STATS ── */
+.stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.stat-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+
+.stat-value {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.stat-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+/* ── CLASS BREAKDOWN ── */
+.class-breakdown { display: flex; flex-direction: column; gap: 10px; }
+
+.class-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.class-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.class-name {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-secondary);
+  flex: 1;
+}
+
+.class-bar-wrap {
+  width: 80px;
+  height: 4px;
+  background: var(--bg-raised);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.class-bar {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.class-pct {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-mono);
+  min-width: 32px;
+  text-align: right;
+}
+
+/* ════════════════════════════
+   CONTENT AREA
+════════════════════════════ */
+.content {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── WELCOME SCREEN ── */
+.welcome {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 40px;
+  text-align: center;
+  gap: 24px;
+}
+
+.welcome-title {
+  font-family: var(--font-display);
+  font-size: 64px;
+  letter-spacing: 8px;
+  line-height: 1;
+  color: transparent;
+  background: linear-gradient(135deg, #e8edf5 0%, #8a9bb5 60%, #3b4a6b 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+.welcome-sub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
+
+.welcome-desc {
+  max-width: 480px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.welcome-steps {
+  display: flex;
+  gap: 32px;
+  margin-top: 16px;
+}
+
+.step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.step-num {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border-bright);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--cyan);
+}
+
+.step-text {
+  font-size: 11px;
+  color: var(--text-dim);
+  max-width: 100px;
+  line-height: 1.4;
+}
+
+/* ── LOADING ── */
+.loading-screen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+}
+
+.brain-loader {
+  position: relative;
+  width: 80px;
+  height: 80px;
+}
+
+.brain-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  animation: spin 2s linear infinite;
+}
+
+.brain-ring:nth-child(1) {
+  border-top-color: var(--cyan);
+  animation-duration: 1.2s;
+}
+
+.brain-ring:nth-child(2) {
+  inset: 10px;
+  border-right-color: var(--purple);
+  animation-duration: 1.8s;
+  animation-direction: reverse;
+}
+
+.brain-ring:nth-child(3) {
+  inset: 22px;
+  border-bottom-color: var(--cyan);
+  animation-duration: 2.4s;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.loading-text {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
+
+.loading-sub {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.progress-bar-wrap {
+  width: 240px;
+  height: 2px;
+  background: var(--bg-raised);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--cyan-dim), var(--cyan));
+  border-radius: 2px;
+  animation: progress 3s ease-in-out infinite;
+}
+
+@keyframes progress {
+  0%   { width: 5%; }
+  50%  { width: 80%; }
+  100% { width: 95%; }
+}
+
+/* ── RESULTS ── */
+.results {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.results-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.results-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.results-filename {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.results-headline {
+  font-family: var(--font-display);
+  font-size: 28px;
+  letter-spacing: 3px;
+  color: var(--text-primary);
+}
+
+.results-actions { display: flex; gap: 8px; }
+
+.btn-secondary {
+  padding: 7px 14px;
+  background: transparent;
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-secondary:hover {
+  border-color: var(--cyan-dim);
+  color: var(--text-primary);
+}
+
+/* ── METRIC CARDS ── */
+.metrics-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.metric-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+
+.metric-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+}
+
+.metric-card.ictal::before   { background: var(--ictal-color); }
+.metric-card.pre::before     { background: var(--pre-color); }
+.metric-card.post::before    { background: var(--post-color); }
+.metric-card.inter::before   { background: var(--inter-color); }
+.metric-card.neutral::before { background: var(--cyan); }
+
+.metric-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.metric-value {
+  font-family: var(--font-display);
+  font-size: 36px;
+  letter-spacing: 2px;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.metric-card.ictal .metric-value { color: var(--ictal-color); }
+.metric-card.pre .metric-value   { color: var(--pre-color); }
+.metric-card.post .metric-value  { color: var(--post-color); }
+.metric-card.inter .metric-value { color: var(--inter-color); }
+.metric-card.neutral .metric-value { color: var(--cyan); }
+
+.metric-sub {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* ── WAVEFORM CANVAS ── */
+.waveform-panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.panel-body { padding: 16px; }
+
+.waveform-container {
+  position: relative;
+  width: 100%;
+  height: 220px;
+  overflow: hidden;
+}
+
+canvas.waveform-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+/* ── TIMELINE ── */
+.timeline-panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.timeline-body { padding: 16px; }
+
+.timeline-track {
+  position: relative;
+  height: 40px;
+  background: var(--bg-raised);
+  border-radius: var(--radius);
+  overflow: hidden;
+  cursor: crosshair;
+}
+
+.timeline-segment {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  opacity: 0.85;
+  transition: opacity 0.15s;
+  border-right: 1px solid rgba(0,0,0,0.3);
+}
+
+.timeline-segment:hover { opacity: 1; }
+
+.timeline-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+}
+
+.timeline-label-text {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-dim);
+}
+
+/* Tooltip */
+#timeline-tooltip {
+  position: fixed;
+  background: rgba(10, 14, 26, 0.95);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  pointer-events: none;
+  z-index: 500;
+  display: none;
+  backdrop-filter: blur(8px);
+}
+
+.tooltip-label { font-size: 11px; font-weight: 700; margin-bottom: 4px; }
+.tooltip-row { display: flex; justify-content: space-between; gap: 16px; color: var(--text-secondary); }
+
+/* ── WINDOW TABLE ── */
+.table-panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.table-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.filter-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.filter-btn:hover, .filter-btn.active {
+  border-color: var(--cyan-dim);
+  color: var(--text-primary);
+  background: rgba(0,212,255,0.05);
+}
+
+.filter-btn.ictal.active   { border-color: var(--ictal-color); color: var(--ictal-color); background: rgba(239,68,68,0.07); }
+.filter-btn.pre.active     { border-color: var(--pre-color); color: var(--pre-color); background: rgba(234,179,8,0.07); }
+.filter-btn.post.active    { border-color: var(--post-color); color: var(--post-color); background: rgba(59,130,246,0.07); }
+.filter-btn.inter.active   { border-color: var(--inter-color); color: var(--inter-color); background: rgba(34,197,94,0.07); }
+
+.table-scroll {
+  overflow-y: auto;
+  max-height: 320px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-raised);
+  padding: 10px 14px;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+tbody tr {
+  border-bottom: 1px solid rgba(30, 42, 63, 0.6);
+  transition: background 0.1s;
+}
+
+tbody tr:hover { background: var(--bg-hover); }
+
+tbody td {
+  padding: 9px 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-mono);
+  white-space: nowrap;
+}
+
+.label-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.conf-bar-wrap {
+  width: 60px;
+  height: 3px;
+  background: var(--bg-raised);
+  border-radius: 2px;
+  overflow: hidden;
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+.conf-bar {
+  height: 100%;
+  background: var(--cyan);
+  border-radius: 2px;
+}
+
+/* ── CHARTS ROW ── */
+.charts-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.chart-panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.chart-body {
+  padding: 16px;
+  position: relative;
+  height: 240px;
+}
+
+/* ── ERROR PANEL ── */
+.error-panel {
+  margin: 24px;
+  background: rgba(239,68,68,0.06);
+  border: 1px solid rgba(239,68,68,0.3);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  box-shadow: var(--glow-red);
+}
+
+.error-title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  letter-spacing: 2px;
+  color: var(--red);
+  margin-bottom: 8px;
+}
+
+.error-detail {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  line-height: 1.8;
+}
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+/* ── HIDDEN ── */
+.hidden { display: none !important; }
+
+/* ── TOOLTIP ── */
+#timeline-tooltip {
+  min-width: 180px;
+}
+
+/* ── ANNOTATIONS LIST ── */
+.seizure-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: rgba(239,68,68,0.08);
+  border: 1px solid rgba(239,68,68,0.25);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--red);
+  margin: 3px;
+}
+
+.no-seizure-chip {
+  display: inline-flex;
+  padding: 4px 10px;
+  background: rgba(34,197,94,0.06);
+  border: 1px solid rgba(34,197,94,0.2);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--inter-color);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-in { animation: fadeIn 0.4s ease forwards; }
+
+.results > * { animation: fadeIn 0.3s ease forwards; }
+.results > *:nth-child(2) { animation-delay: 0.05s; }
+.results > *:nth-child(3) { animation-delay: 0.10s; }
+.results > *:nth-child(4) { animation-delay: 0.15s; }
+.results > *:nth-child(5) { animation-delay: 0.20s; }
+.results > *:nth-child(6) { animation-delay: 0.25s; }
+
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="header">
+  <div class="logo">
+    <div class="logo-icon">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M9 3C6.23858 3 4 5.23858 4 8C4 9.66225 4.80699 11.1412 6.05133 12C4.80699 12.8588 4 14.3378 4 16C4 18.7614 6.23858 21 9 21C10.0691 21 11.0628 20.6564 11.8728 20.0706" stroke="#00d4ff" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M15 3C17.7614 3 20 5.23858 20 8C20 9.66225 19.193 11.1412 17.9487 12C19.193 12.8588 20 14.3378 20 16C20 18.7614 17.7614 21 15 21" stroke="#00d4ff" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M9 12H15" stroke="#00d4ff" stroke-width="1.5" stroke-linecap="round"/>
+        <circle cx="12" cy="12" r="1" fill="#00d4ff"/>
+      </svg>
+    </div>
+    <div>
+      <div class="logo-text">NEUROMARK</div>
+      <div class="logo-sub">EEG Seizure Stage Analysis</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="status-pill" id="status-pill">
+      <div class="status-dot"></div>
+      <span class="status-text" id="status-text">CHECKING MODEL...</span>
+    </div>
+  </div>
+</header>
+
+<!-- MAIN LAYOUT -->
+<div class="main">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+
+    <!-- FILE UPLOAD SECTION -->
+    <div class="sidebar-section">
+      <div class="section-label">Data Input</div>
+
+      <!-- EDF Drop Zone -->
+      <div class="drop-zone" id="edf-drop" onclick="document.getElementById('edf-input').click()">
+        <input type="file" id="edf-input" accept=".edf">
+        <div class="drop-icon">
+          <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="8" y="4" width="24" height="30" rx="3" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M14 14H26M14 20H22M14 26H20" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <circle cx="30" cy="30" r="7" fill="#0a0e1a" stroke="#00d4ff" stroke-width="1.5"/>
+            <path d="M30 27V33M27 30H33" stroke="#00d4ff" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="drop-title" id="edf-drop-title">Upload EDF File</div>
+        <div class="drop-sub">.edf — drag & drop or click to browse</div>
+        <div class="file-info hidden" id="edf-file-info"></div>
+      </div>
+
+      <!-- CSV_BI Optional Upload -->
+      <div class="optional-upload" id="csvbi-upload" onclick="document.getElementById('csvbi-input').click()">
+        <input type="file" id="csvbi-input" accept=".csv_bi,.csvbi,.csv">
+        <div class="optional-label" id="csvbi-label">CSV_BI Annotation File</div>
+        <div class="optional-badge" id="csvbi-badge">optional</div>
+      </div>
+
+      <!-- Montage -->
+      <div class="form-group">
+        <label class="form-label">EEG Montage</label>
+        <div class="select-wrap">
+          <select id="montage-select">
+            <option value="">Auto-detect from filename</option>
+            <option value="01_tcp_ar">01_tcp_ar (AR — Referential)</option>
+            <option value="02_tcp_le">02_tcp_le (LE — Linked Ears)</option>
+            <option value="03_tcp_ar_a">03_tcp_ar_a (AR-A — A1/A2 ref)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- RUN BUTTON -->
+    <div class="sidebar-section">
+      <button class="btn-analyze" id="analyze-btn" disabled>
+        <span>ANALYZE EEG</span>
+      </button>
+    </div>
+
+    <!-- RESULTS SUMMARY (hidden until analysis) -->
+    <div class="sidebar-section hidden" id="sidebar-results">
+      <div class="section-label">Session Summary</div>
+
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-value" id="stat-duration">—</div>
+          <div class="stat-label">Duration (s)</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-windows">—</div>
+          <div class="stat-label">Windows</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-confidence">—</div>
+          <div class="stat-label">Confidence</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-seizures">—</div>
+          <div class="stat-label">Seizures</div>
+        </div>
+      </div>
+
+      <div style="margin-top:16px">
+        <div class="section-label">Class Distribution</div>
+        <div class="class-breakdown" id="class-breakdown"></div>
+      </div>
+
+      <div style="margin-top:16px" id="seizure-info-box"></div>
+    </div>
+
+    <!-- SPACER -->
+    <div style="flex:1"></div>
+
+    <!-- FOOTER -->
+    <div class="sidebar-section" style="padding: 16px 24px;">
+      <div style="font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); line-height: 1.8; letter-spacing: 0.5px;">
+        MODEL · 1D CNN · 6 BIPOLAR CH<br>
+        TUH EEG DATASET · 4-CLASS<br>
+        WINDOW 5s · OVERLAP 50%<br>
+        SFREQ 256 Hz
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- CONTENT -->
+  <main class="content" id="content-area">
+
+    <!-- WELCOME -->
+    <div class="welcome" id="welcome-screen">
+      <div class="welcome-sub">v1.0 — Automated Stage Detection</div>
+      <div class="welcome-title">EEG<br>ANALYSIS</div>
+      <div class="welcome-desc">
+        Upload an EEG recording in EDF format along with its annotation file
+        to automatically segment and classify seizure stages using a trained
+        1D Convolutional Neural Network.
+      </div>
+      <div class="welcome-steps">
+        <div class="step">
+          <div class="step-num">01</div>
+          <div class="step-text">Upload EDF recording</div>
+        </div>
+        <div class="step">
+          <div class="step-num">02</div>
+          <div class="step-text">Add CSV_BI annotation</div>
+        </div>
+        <div class="step">
+          <div class="step-num">03</div>
+          <div class="step-text">Run analysis</div>
+        </div>
+        <div class="step">
+          <div class="step-num">04</div>
+          <div class="step-text">View classified segments</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LOADING -->
+    <div class="loading-screen hidden" id="loading-screen">
+      <div class="brain-loader">
+        <div class="brain-ring"></div>
+        <div class="brain-ring"></div>
+        <div class="brain-ring"></div>
+      </div>
+      <div class="loading-text">Processing EEG Signal</div>
+      <div class="progress-bar-wrap">
+        <div class="progress-bar"></div>
+      </div>
+      <div class="loading-sub" id="loading-sub">Filtering and resampling...</div>
+    </div>
+
+    <!-- RESULTS (populated by JS) -->
+    <div class="results hidden" id="results-screen"></div>
+
+    <!-- ERROR -->
+    <div class="error-panel hidden" id="error-panel">
+      <div class="error-title">ANALYSIS FAILED</div>
+      <div class="error-detail" id="error-detail"></div>
+    </div>
+
+  </main>
+</div>
+
+<!-- TOOLTIP -->
+<div id="timeline-tooltip">
+  <div class="tooltip-label" id="tt-label"></div>
+  <div class="tooltip-row"><span>Time</span><span id="tt-time"></span></div>
+  <div class="tooltip-row"><span>Confidence</span><span id="tt-conf"></span></div>
+  <div class="tooltip-row"><span>Window</span><span id="tt-win"></span></div>
+</div>
+
+<script>
+/* ════════════════════════════════════════════════════════════════════════
+   NEUROMARK — Frontend Logic
+════════════════════════════════════════════════════════════════════════ */
+
+let edfFile    = null;
+let csvbiFile  = null;
+let lastResult = null;
+let chartPie   = null;
+let chartConf  = null;
+let activeFilter = 'all';
+let sessionId  = null;
+
+const $ = id => document.getElementById(id);
+
+// ── STATUS CHECK ──────────────────────────────────────────────────────────
+async function checkStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const d = await r.json();
+    const pill = $('status-pill');
+    const text = $('status-text');
+    if (d.ready) {
+      pill.className = 'status-pill ready';
+      text.textContent = `MODEL READY · ${d.model_size_mb} MB`;
+    } else {
+      pill.className = 'status-pill error';
+      text.textContent = 'MODEL NOT FOUND';
+    }
+  } catch {
+    $('status-pill').className = 'status-pill error';
+    $('status-text').textContent = 'SERVER OFFLINE';
+  }
+}
+checkStatus();
+
+// ── FILE HANDLING ─────────────────────────────────────────────────────────
+$('edf-input').addEventListener('change', function() {
+  if (this.files[0]) setEdfFile(this.files[0]);
+});
+
+$('csvbi-input').addEventListener('change', function() {
+  if (this.files[0]) setCsvbiFile(this.files[0]);
+});
+
+// Drag and Drop
+const edfDrop = $('edf-drop');
+edfDrop.addEventListener('dragover', e => { e.preventDefault(); edfDrop.classList.add('dragover'); });
+edfDrop.addEventListener('dragleave', () => edfDrop.classList.remove('dragover'));
+edfDrop.addEventListener('drop', e => {
+  e.preventDefault();
+  edfDrop.classList.remove('dragover');
+  const f = e.dataTransfer.files[0];
+  if (f && f.name.toLowerCase().endsWith('.edf')) setEdfFile(f);
+});
+
+function setEdfFile(file) {
+  edfFile = file;
+  const drop = $('edf-drop');
+  drop.classList.add('has-file');
+  $('edf-drop-title').textContent = 'EDF File Ready';
+  const info = $('edf-file-info');
+  info.textContent = `${file.name}  (${(file.size / 1024 / 1024).toFixed(1)} MB)`;
+  info.classList.remove('hidden');
+  updateAnalyzeBtn();
+}
+
+function setCsvbiFile(file) {
+  csvbiFile = file;
+  $('csvbi-upload').classList.add('has-file');
+  $('csvbi-label').textContent = file.name;
+  $('csvbi-label').classList.add('active');
+  $('csvbi-badge').textContent = '✓';
+}
+
+function updateAnalyzeBtn() {
+  $('analyze-btn').disabled = !edfFile;
+}
+
+// ── ANALYZE ───────────────────────────────────────────────────────────────
+$('analyze-btn').addEventListener('click', runAnalysis);
+
+const loadingMessages = [
+  "Loading EDF file...",
+  "Computing bipolar channels...",
+  "Applying bandpass filter (0.5–40 Hz)...",
+  "Segmenting into 5-second windows...",
+  "Normalizing windows...",
+  "Running CNN inference...",
+  "Building results..."
+];
+
+async function runAnalysis() {
+  if (!edfFile) return;
+
+  showScreen('loading');
+  let msgIdx = 0;
+  const msgInterval = setInterval(() => {
+    $('loading-sub').textContent = loadingMessages[Math.min(msgIdx++, loadingMessages.length - 1)];
+  }, 1800);
+
+  try {
+    const formData = new FormData();
+    formData.append('edf_file', edfFile);
+    if (csvbiFile) formData.append('csvbi_file', csvbiFile);
+    const montage = $('montage-select').value;
+    if (montage) formData.append('montage', montage);
+
+    const response = await fetch('/api/analyze', {
+      method: 'POST',
+      body: formData,
+    });
+
+    clearInterval(msgInterval);
+    const data = await response.json();
+
+    if (!response.ok) {
+      showError(data.error, data.detail);
+      return;
+    }
+
+    lastResult = data;
+    sessionId  = data.session_id;
+    activeFilter = 'all';
+    renderResults(data);
+    updateSidebar(data);
+    showScreen('results');
+
+  } catch (err) {
+    clearInterval(msgInterval);
+    showError('Network or server error', err.message);
+  }
+}
+
+// ── SCREENS ───────────────────────────────────────────────────────────────
+function showScreen(name) {
+  $('welcome-screen').classList.add('hidden');
+  $('loading-screen').classList.add('hidden');
+  $('results-screen').classList.add('hidden');
+  $('error-panel').classList.add('hidden');
+
+  if (name === 'welcome')  $('welcome-screen').classList.remove('hidden');
+  if (name === 'loading')  $('loading-screen').classList.remove('hidden');
+  if (name === 'results')  $('results-screen').classList.remove('hidden');
+  if (name === 'error')    $('error-panel').classList.remove('hidden');
+}
+
+function showError(title, detail) {
+  $('error-detail').textContent = `${title}\n\n${detail || ''}`;
+  showScreen('error');
+}
+
+// ── SIDEBAR UPDATE ────────────────────────────────────────────────────────
+function updateSidebar(data) {
+  const s = data.summary;
+  $('stat-duration').textContent   = s.duration_sec;
+  $('stat-windows').textContent    = s.total_windows;
+  $('stat-confidence').textContent = s.mean_confidence + '%';
+  $('stat-seizures').textContent   = s.seizure_periods.length;
+
+  // Class breakdown
+  const bd = $('class-breakdown');
+  bd.innerHTML = '';
+  const ORDER = ['ictal', 'pre-ictal', 'post-ictal', 'inter-ictal'];
+  for (const cls of ORDER) {
+    const info = s.class_counts[cls];
+    if (!info) continue;
+    const row = document.createElement('div');
+    row.className = 'class-row';
+    row.innerHTML = `
+      <div class="class-dot" style="background:${info.color}"></div>
+      <div class="class-name">${cls}</div>
+      <div class="class-bar-wrap">
+        <div class="class-bar" style="width:${info.percent}%;background:${info.color}"></div>
+      </div>
+      <div class="class-pct">${info.percent}%</div>
+    `;
+    bd.appendChild(row);
+  }
+
+  // Seizure info
+  const box = $('seizure-info-box');
+  box.innerHTML = '';
+  if (s.seizure_periods.length > 0) {
+    const d = document.createElement('div');
+    d.innerHTML = `<div class="section-label">Seizure Periods</div>`;
+    s.seizure_periods.forEach((p, i) => {
+      const chip = document.createElement('div');
+      chip.className = 'seizure-chip';
+      chip.innerHTML = `⚡ ${p.start}s → ${p.end}s <span style="opacity:.5">(${p.duration}s)</span>`;
+      d.appendChild(chip);
+    });
+    box.appendChild(d);
+  } else if (data.has_annotations) {
+    box.innerHTML = `<div class="no-seizure-chip">✓ No seizures in annotations</div>`;
+  }
+
+  $('sidebar-results').classList.remove('hidden');
+}
+
+// ── RENDER RESULTS ────────────────────────────────────────────────────────
+function renderResults(data) {
+  const { summary: s, windows, waveform } = data;
+
+  const el = $('results-screen');
+  el.innerHTML = '';
+
+  // HEADER
+  el.appendChild(htmlEl(`
+    <div class="results-header">
+      <div class="results-title">
+        <div class="results-filename">${data.filename}</div>
+        <div class="results-headline">ANALYSIS COMPLETE</div>
+      </div>
+      <div class="results-actions">
+        <button class="btn-secondary" onclick="exportJSON()">↓ Export JSON</button>
+        <button class="btn-secondary" onclick="exportCSV()">↓ Export CSV</button>
+      </div>
+    </div>
+  `));
+
+  // METRICS
+  const counts = s.class_counts;
+  el.appendChild(htmlEl(`
+    <div class="metrics-row">
+      <div class="metric-card ictal">
+        <div class="metric-label">Ictal Windows</div>
+        <div class="metric-value">${counts['ictal']?.count ?? 0}</div>
+        <div class="metric-sub">${counts['ictal']?.percent ?? 0}% of total</div>
+      </div>
+      <div class="metric-card pre">
+        <div class="metric-label">Pre-Ictal</div>
+        <div class="metric-value">${counts['pre-ictal']?.count ?? 0}</div>
+        <div class="metric-sub">${counts['pre-ictal']?.percent ?? 0}% of total</div>
+      </div>
+      <div class="metric-card post">
+        <div class="metric-label">Post-Ictal</div>
+        <div class="metric-value">${counts['post-ictal']?.count ?? 0}</div>
+        <div class="metric-sub">${counts['post-ictal']?.percent ?? 0}% of total</div>
+      </div>
+      <div class="metric-card inter">
+        <div class="metric-label">Inter-Ictal</div>
+        <div class="metric-value">${counts['inter-ictal']?.count ?? 0}</div>
+        <div class="metric-sub">${counts['inter-ictal']?.percent ?? 0}% of total</div>
+      </div>
+    </div>
+  `));
+
+  // WAVEFORM
+  const wfPanel = htmlEl(`
+    <div class="waveform-panel">
+      <div class="panel-header">
+        <div class="panel-title">EEG Waveform — FP1-T3 Channel (filtered, normalized)</div>
+        <div style="font-family:var(--font-mono);font-size:9px;color:var(--text-dim)">256 Hz · 0.5–40 Hz bandpass</div>
+      </div>
+      <div class="panel-body">
+        <div class="waveform-container">
+          <canvas id="waveform-canvas"></canvas>
+        </div>
+      </div>
+    </div>
+  `);
+  el.appendChild(wfPanel);
+
+  // TIMELINE
+  const tlPanel = htmlEl(`
+    <div class="timeline-panel">
+      <div class="panel-header">
+        <div class="panel-title">Prediction Timeline — ${windows.length} windows × 5s</div>
+        <div style="display:flex;gap:12px;align-items:center">
+          ${['ictal','pre-ictal','post-ictal','inter-ictal'].map(cls => {
+            const c = s.class_counts[cls]?.color ?? '#888';
+            return `<span style="font-family:var(--font-mono);font-size:9px;display:flex;align-items:center;gap:5px;">
+              <span style="width:8px;height:8px;border-radius:50%;background:${c};display:inline-block"></span>
+              ${cls}
+            </span>`;
+          }).join('')}
+        </div>
+      </div>
+      <div class="timeline-body">
+        <div class="timeline-track" id="timeline-track"></div>
+        <div class="timeline-labels">
+          <span class="timeline-label-text">0s</span>
+          <span class="timeline-label-text">${Math.round(s.duration_sec / 4)}s</span>
+          <span class="timeline-label-text">${Math.round(s.duration_sec / 2)}s</span>
+          <span class="timeline-label-text">${Math.round(s.duration_sec * 3 / 4)}s</span>
+          <span class="timeline-label-text">${Math.round(s.duration_sec)}s</span>
+        </div>
+      </div>
+    </div>
+  `);
+  el.appendChild(tlPanel);
+
+  // CHARTS ROW
+  const chartsRow = htmlEl(`
+    <div class="charts-row">
+      <div class="chart-panel">
+        <div class="panel-header">
+          <div class="panel-title">Class Distribution</div>
+        </div>
+        <div class="chart-body">
+          <canvas id="pie-chart"></canvas>
+        </div>
+      </div>
+      <div class="chart-panel">
+        <div class="panel-header">
+          <div class="panel-title">Confidence Distribution</div>
+        </div>
+        <div class="chart-body">
+          <canvas id="conf-chart"></canvas>
+        </div>
+      </div>
+    </div>
+  `);
+  el.appendChild(chartsRow);
+
+  // TABLE
+  const tablePanel = htmlEl(`
+    <div class="table-panel">
+      <div class="table-controls">
+        <span style="font-family:var(--font-mono);font-size:9px;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;margin-right:6px">Filter:</span>
+        <button class="filter-btn active" data-filter="all" onclick="setFilter('all',this)">ALL</button>
+        <button class="filter-btn ictal"  data-filter="ictal" onclick="setFilter('ictal',this)">ICTAL</button>
+        <button class="filter-btn pre"    data-filter="pre-ictal" onclick="setFilter('pre-ictal',this)">PRE</button>
+        <button class="filter-btn post"   data-filter="post-ictal" onclick="setFilter('post-ictal',this)">POST</button>
+        <button class="filter-btn inter"  data-filter="inter-ictal" onclick="setFilter('inter-ictal',this)">INTER</button>
+        <span style="margin-left:auto;font-family:var(--font-mono);font-size:9px;color:var(--text-dim)" id="table-count"></span>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Time Start</th>
+              <th>Time End</th>
+              <th>Ground Truth</th>
+              <th>Prediction</th>
+              <th>Confidence</th>
+              <th>Ictal %</th>
+              <th>Pre %</th>
+              <th>Post %</th>
+              <th>Inter %</th>
+            </tr>
+          </thead>
+          <tbody id="result-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  `);
+  el.appendChild(tablePanel);
+
+  // RENDER ASYNC VISUALS
+  setTimeout(() => {
+    renderWaveform(waveform, windows, s.duration_sec);
+    renderTimeline(windows, s.duration_sec);
+    renderPieChart(s.class_counts);
+    renderConfChart(windows);
+    renderTable(windows);
+  }, 50);
+}
+
+function htmlEl(html) {
+  const div = document.createElement('div');
+  div.innerHTML = html.trim();
+  return div.firstChild;
+}
+
+// ── WAVEFORM RENDERER ─────────────────────────────────────────────────────
+function renderWaveform(waveform, windows, duration_sec) {
+  const canvas = $('waveform-canvas');
+  if (!canvas || !waveform) return;
+
+  const ctx = canvas.getContext('2d');
+  canvas.width  = canvas.offsetWidth  * window.devicePixelRatio;
+  canvas.height = canvas.offsetHeight * window.devicePixelRatio;
+  ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+  const W = canvas.offsetWidth;
+  const H = canvas.offsetHeight;
+
+  ctx.fillStyle = 'transparent';
+  ctx.clearRect(0, 0, W, H);
+
+  // Draw segment backgrounds
+  windows.forEach(win => {
+    const x1 = (win.t_start / duration_sec) * W;
+    const x2 = (win.t_end   / duration_sec) * W;
+    const color = win.pred_color || '#22c55e';
+    ctx.fillStyle = color + '14';
+    ctx.fillRect(x1, 0, x2 - x1, H);
+  });
+
+  // Draw waveform (FP1-T3)
+  const ch = waveform.channels['FP1-T3'];
+  const times = waveform.times;
+  if (!ch) return;
+
+  const midY = H / 2;
+  const amp  = H * 0.38;
+
+  ctx.beginPath();
+  ctx.strokeStyle = '#00d4ff';
+  ctx.lineWidth = 1;
+  ctx.globalAlpha = 0.85;
+
+  for (let i = 0; i < ch.length; i++) {
+    const x = (times[i] / duration_sec) * W;
+    const y = midY - ch[i] * amp;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  // Center line
+  ctx.beginPath();
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 1;
+  ctx.moveTo(0, midY);
+  ctx.lineTo(W, midY);
+  ctx.stroke();
+}
+
+// ── TIMELINE RENDERER ─────────────────────────────────────────────────────
+function renderTimeline(windows, duration_sec) {
+  const track = $('timeline-track');
+  if (!track) return;
+
+  track.innerHTML = '';
+  const tt = $('timeline-tooltip');
+
+  windows.forEach((win, idx) => {
+    const seg = document.createElement('div');
+    seg.className = 'timeline-segment';
+    const left  = (win.t_start / duration_sec) * 100;
+    const width = ((win.t_end - win.t_start) / duration_sec) * 100;
+    seg.style.left       = left + '%';
+    seg.style.width      = width + '%';
+    seg.style.background = win.pred_color;
+
+    seg.addEventListener('mousemove', e => {
+      tt.style.display = 'block';
+      tt.style.left    = (e.clientX + 12) + 'px';
+      tt.style.top     = (e.clientY - 60) + 'px';
+      $('tt-label').textContent = win.pred_label_str.toUpperCase();
+      $('tt-label').style.color = win.pred_color;
+      $('tt-time').textContent  = `${win.t_start.toFixed(1)}s → ${win.t_end.toFixed(1)}s`;
+      $('tt-conf').textContent  = win.confidence + '%';
+      $('tt-win').textContent   = `#${idx + 1}`;
+    });
+    seg.addEventListener('mouseleave', () => { tt.style.display = 'none'; });
+
+    track.appendChild(seg);
+  });
+}
+
+// ── PIE CHART ─────────────────────────────────────────────────────────────
+function renderPieChart(classCounts) {
+  const canvas = $('pie-chart');
+  if (!canvas) return;
+
+  if (chartPie) { chartPie.destroy(); chartPie = null; }
+
+  const labels = ['Inter-Ictal', 'Pre-Ictal', 'Ictal', 'Post-Ictal'];
+  const keys   = ['inter-ictal', 'pre-ictal', 'ictal', 'post-ictal'];
+  const colors = ['#22c55e', '#eab308', '#ef4444', '#3b82f6'];
+
+  chartPie = new Chart(canvas, {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{
+        data: keys.map(k => classCounts[k]?.count ?? 0),
+        backgroundColor: colors.map(c => c + 'cc'),
+        borderColor: colors,
+        borderWidth: 1,
+        hoverBorderWidth: 2,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'right',
+          labels: {
+            color: '#8a9bb5',
+            font: { family: 'Space Mono', size: 10 },
+            boxWidth: 10,
+            padding: 12,
+          }
+        },
+        tooltip: {
+          backgroundColor: '#0f1420',
+          borderColor: '#2a3a55',
+          borderWidth: 1,
+          titleColor: '#e8edf5',
+          bodyColor: '#8a9bb5',
+          titleFont: { family: 'Space Mono', size: 11 },
+          bodyFont:  { family: 'Space Mono', size: 10 },
+          callbacks: {
+            label: ctx => ` ${ctx.label}: ${ctx.raw} windows`,
+          }
+        }
+      },
+      cutout: '62%',
+    }
+  });
+}
+
+// ── CONFIDENCE CHART ──────────────────────────────────────────────────────
+function renderConfChart(windows) {
+  const canvas = $('conf-chart');
+  if (!canvas) return;
+
+  if (chartConf) { chartConf.destroy(); chartConf = null; }
+
+  // Bucket confidences into 10% bins
+  const buckets = Array(10).fill(0);
+  windows.forEach(w => {
+    const idx = Math.min(9, Math.floor(w.confidence / 10));
+    buckets[idx]++;
+  });
+
+  chartConf = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: ['0-10%','10-20%','20-30%','30-40%','40-50%','50-60%','60-70%','70-80%','80-90%','90-100%'],
+      datasets: [{
+        label: 'Windows',
+        data: buckets,
+        backgroundColor: buckets.map((_, i) => `rgba(0,212,255,${0.2 + i * 0.08})`),
+        borderColor: '#00d4ff',
+        borderWidth: 1,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#0f1420',
+          borderColor: '#2a3a55',
+          borderWidth: 1,
+          titleColor: '#e8edf5',
+          bodyColor: '#8a9bb5',
+          titleFont: { family: 'Space Mono', size: 11 },
+          bodyFont:  { family: 'Space Mono', size: 10 },
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#4a5a75', font: { family: 'Space Mono', size: 8 } },
+          grid: { color: '#1e2a3f' },
+        },
+        y: {
+          ticks: { color: '#4a5a75', font: { family: 'Space Mono', size: 9 } },
+          grid: { color: '#1e2a3f' },
+        }
+      }
+    }
+  });
+}
+
+// ── TABLE ─────────────────────────────────────────────────────────────────
+function renderTable(windows) {
+  populateTable(windows, activeFilter);
+}
+
+function setFilter(filter, btn) {
+  activeFilter = filter;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  if (lastResult) populateTable(lastResult.windows, filter);
+}
+
+function populateTable(windows, filter) {
+  const tbody = $('result-tbody');
+  if (!tbody) return;
+
+  const filtered = filter === 'all'
+    ? windows
+    : windows.filter(w => w.pred_label_str === filter);
+
+  $('table-count').textContent = `${filtered.length} windows`;
+
+  const MAX_ROWS = 200;
+  const rows = filtered.slice(0, MAX_ROWS);
+
+  tbody.innerHTML = rows.map((w, i) => `
+    <tr>
+      <td style="color:var(--text-dim)">${i + 1}</td>
+      <td>${w.t_start.toFixed(2)}s</td>
+      <td>${w.t_end.toFixed(2)}s</td>
+      <td>
+        <span class="label-badge" style="background:${w.pred_color}18;color:${w.pred_color}">
+          ${w.label_str.toUpperCase()}
+        </span>
+      </td>
+      <td>
+        <span class="label-badge" style="background:${w.pred_color}28;color:${w.pred_color};border:1px solid ${w.pred_color}44">
+          ● ${w.pred_label_str.toUpperCase()}
+        </span>
+      </td>
+      <td>
+        <span class="conf-bar-wrap"><span class="conf-bar" style="width:${w.confidence}%"></span></span>
+        ${w.confidence}%
+      </td>
+      <td style="color:var(--ictal-color)">${w.probs['ictal']}%</td>
+      <td style="color:var(--pre-color)">${w.probs['pre-ictal']}%</td>
+      <td style="color:var(--post-color)">${w.probs['post-ictal']}%</td>
+      <td style="color:var(--inter-color)">${w.probs['inter-ictal']}%</td>
+    </tr>
+  `).join('');
+
+  if (filtered.length > MAX_ROWS) {
+    tbody.innerHTML += `
+      <tr>
+        <td colspan="10" style="text-align:center;color:var(--text-dim);font-family:var(--font-mono);font-size:10px;padding:12px">
+          Showing first ${MAX_ROWS} of ${filtered.length} windows — Export to see all
+        </td>
+      </tr>
+    `;
+  }
+}
+
+// ── EXPORT ────────────────────────────────────────────────────────────────
+function exportJSON() {
+  if (!sessionId) return;
+  window.open(`/api/export/${sessionId}`, '_blank');
+}
+
+function exportCSV() {
+  if (!lastResult) return;
+
+  const rows = [
+    ['Window', 'T_Start', 'T_End', 'Ground_Truth', 'Prediction', 'Confidence_Pct',
+     'Ictal_Pct', 'Pre_Pct', 'Post_Pct', 'Inter_Pct']
+  ];
+
+  lastResult.windows.forEach((w, i) => {
+    rows.push([
+      i + 1,
+      w.t_start.toFixed(3),
+      w.t_end.toFixed(3),
+      w.label_str,
+      w.pred_label_str,
+      w.confidence,
+      w.probs['ictal'],
+      w.probs['pre-ictal'],
+      w.probs['post-ictal'],
+      w.probs['inter-ictal'],
+    ]);
+  });
+
+  const csv = rows.map(r => r.join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
+  a.download = `neuromark_result_${sessionId}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// Reset
+function resetApp() {
+  edfFile = csvbiFile = lastResult = null;
+  sessionId = null;
+  $('edf-drop').classList.remove('has-file');
+  $('edf-drop-title').textContent = 'Upload EDF File';
+  $('edf-file-info').classList.add('hidden');
+  $('csvbi-upload').classList.remove('has-file');
+  $('csvbi-label').textContent = 'CSV_BI Annotation File';
+  $('csvbi-label').classList.remove('active');
+  $('csvbi-badge').textContent = 'optional';
+  $('sidebar-results').classList.add('hidden');
+  updateAnalyzeBtn();
+  showScreen('welcome');
+}
+</script>
+</body>
+</html>
